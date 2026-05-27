@@ -51,19 +51,22 @@ STATE_DIM = 12
 DEPTH = 5
 PERTURB_RANK = 2
 
-LR_SCHEDULE = 'none'          # 'none' | 'cosine'
 PROBE_EPOCHS = set()           # epochs to run spatial probe
 SEQ_PHASE_SNAPSHOTS = False    # G_seq: snapshot Grassmannian after each phase
 
-PROFILE_WEIGHT = 0.0           # L_profile weight
-RANK_WEIGHT = 0.0              # L_rank weight
+# Unified geometric/topological loss weights (paper's three-pillar framework):
+#   L_profile + L_rank target the GEOMETRIC pillar (Grassmannian)
+#   L_topo targets the TOPOLOGICAL pillar (routing entropy)
+PROFILE_WEIGHT = 0.0           # L_profile weight (shortcut penalty)
+RANK_WEIGHT = 0.0              # L_rank weight (rank collapse penalty)
 RANK_TARGET = 2.0              # minimum effective rank floor
-TOPO_WEIGHT = 0.0              # L_topo weight
+TOPO_WEIGHT = 0.0              # L_topo weight (low-entropy routing penalty)
 
-PERTURB_LR_MULT = 1.0          # LR multiplier for mixer rotation params
-TOPO_LR_MULT = 1.0             # LR multiplier for butterfly routing params
+# Per-primitive LR multipliers
+PERTURB_LR_MULT = 1.0          # LR multiplier for mixer perturbation params (U, V, eps)
+TOPO_LR_MULT = 1.0             # LR multiplier for butterfly routing params (phi)
 
-REG_PERTURB_L1 = 0.0           # L1 weight on mixer A_perturb
+REG_PERTURB_L1 = 0.1           # L1 weight on mixer A_perturb (paper default)
 SYM_REG = 0.0                  # ||A_sym||_F^2 weight
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -140,7 +143,10 @@ def compute_unified_loss(model, task_name, layer_acts,
 
     L_profile: penalizes high meaning fraction at early layers (shortcut).
     L_rank:    penalizes rank collapse (top PC dominance).
-    L_topo:    penalizes low-entropy butterfly routing.
+    L_topo:    penalizes low-entropy butterfly routing (encourages diverse routing).
+
+    The three terms correspond to the paper's three-pillar diagnostic framework:
+    geometric (L_profile + L_rank, Grassmannian) and topological (L_topo, routing).
 
     Returns dict with 'profile', 'rank', 'topo' as differentiable scalars.
     """
@@ -257,10 +263,16 @@ def estimate_perturb_lr_mult(model, task_name, loaders):
 def _make_optimizer(model, lr=None):
     """Build Adam with per-primitive-group learning rates.
 
-    Three parameter groups matching Paper 1's three geometric primitive types:
-      1. task/backbone (lr):               theta_head, pointwise, heads, preconditioner
-      2. mixer rotation (lr*PERTURB_LR_MULT): U, V, eps in RotationalProjectionMixer
-      3. routing topology (lr*TOPO_LR_MULT): phi in LearnedButterflyPermutation
+    Three parameter groups matching the paper's three primitive types:
+      1. task/backbone (lr):                  theta_head, pointwise, heads, preconditioner
+      2. mixer perturbation (lr*PERTURB_LR_MULT): U, V, eps in RotationalProjectionMixer
+      3. routing topology (lr*TOPO_LR_MULT):     phi in LearnedButterflyPermutation
+
+    Group 2: the perturbation parameters sit at a near-zero attractor
+    (dL/dU is proportional to eps, which is initialized to zero), so a higher
+    LR multiplier helps them escape that basin when --rank-weight is active.
+    Group 3: paired with --topo-weight, gives the routing primitive its own
+    LR knob.
     """
     if lr is None:
         lr = LR
@@ -502,15 +514,6 @@ def train_single_task(task_name, seed, loaders, epochs=None, verbose=True,
 
     optimizer = _make_optimizer(model)
 
-    scheduler = None
-    if LR_SCHEDULE == 'cosine':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs, eta_min=LR * 0.01
-        )
-        if verbose:
-            print(f"    LR schedule: cosine decay "
-                  f"({LR:.2e} -> {LR*0.01:.2e} over {epochs} epochs)")
-
     if (RANK_WEIGHT > 0 or PROFILE_WEIGHT > 0) and verbose:
         diag = estimate_perturb_lr_mult(model, task_name, loaders)
         print(f"    [grad-ratio] task={diag['task_grad_norm']:.4e}  "
@@ -646,9 +649,6 @@ def train_single_task(task_name, seed, loaders, epochs=None, verbose=True,
             'test_metric': test_m,
             'history': history,
         }, ckpt_path)
-
-        if scheduler is not None:
-            scheduler.step()
 
         if (epoch + 1) in PROBE_EPOCHS:
             probe = run_spatial_probe(model, loaders, task_name, epoch + 1)

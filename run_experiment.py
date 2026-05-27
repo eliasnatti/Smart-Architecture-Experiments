@@ -238,60 +238,92 @@ if __name__ == '__main__':
     import training as T
 
     parser = argparse.ArgumentParser(
-        description='exp7: Multi-task MNIST geodesic coverage experiment'
+        description='Multi-task MNIST geodesic coverage experiment.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('--conditions', nargs='*', default=None,
-                        help='Conditions to run (default: all)')
-    parser.add_argument('--seeds', type=int, nargs='*', default=None,
-                        help='Seeds to use (default: [0, 1, 2])')
-    parser.add_argument('--gram-blocks', type=int, nargs='+', default=[],
-                        metavar='K',
-                        help='Add Gram-routed block-diagonal conditions. '
-                             'Accepts one or more block counts, e.g. --gram-blocks 3 6.')
-    parser.add_argument('--gram-delay', type=int, default=0, metavar='N',
-                        help='Epochs before Gram warmup. 0=warmup before training.')
-    parser.add_argument('--reg-perturb-l1', type=float, default=0.0,
-                        metavar='W',
-                        help='L1 weight on mixer A_perturb.')
-    parser.add_argument('--run-id', type=str, default='', metavar='ID',
-                        help='Label appended to the results filename.')
-    parser.add_argument('--sym-reg', type=float, default=0.0, metavar='W',
-                        help='Weight on ||A_sym||_F^2 penalty.')
-    parser.add_argument('--full-matrix-exp', action='store_true',
-                        help='Use exact matrix_exp instead of Pade [1,1].')
-    parser.add_argument('--full-exp-a', action='store_true',
-                        help='Use full exp(A) instead of skew-only.')
-    parser.add_argument('--profile-weight', type=float, default=0.0, metavar='W',
-                        help='Weight on L_profile (shortcut penalty).')
-    parser.add_argument('--rank-weight', type=float, default=0.0, metavar='W',
-                        help='Weight on L_rank (rank collapse penalty).')
-    parser.add_argument('--rank-target', type=float, default=2.0, metavar='R',
-                        help='Minimum effective rank floor for L_rank.')
-    parser.add_argument('--topo-weight', type=float, default=0.0, metavar='W',
-                        help='Weight on L_topo (low-entropy routing penalty).')
-    parser.add_argument('--perturb-lr-mult', type=float, default=1.0, metavar='M',
-                        help='LR multiplier for mixer perturbation params (U, V, eps).')
-    parser.add_argument('--topo-lr-mult', type=float, default=1.0, metavar='M',
-                        help='LR multiplier for butterfly routing params (phi).')
-    parser.add_argument('--epochs', type=int, default=None, metavar='N',
-                        help='Override EPOCHS global.')
-    parser.add_argument('--lr-schedule', choices=['none', 'cosine'], default='none',
-                        help='LR schedule. cosine: CosineAnnealingLR.')
-    parser.add_argument('--probe-epochs', type=int, nargs='*', default=[],
+
+    sel = parser.add_argument_group('experiment selection')
+    sel.add_argument('--conditions', nargs='*', default=None,
+                     help='Subset of conditions to run. Default: all 7 '
+                          '(A_cls, B_add, C_cmp, D_spa, E_oe, F_multi, G_seq).')
+    sel.add_argument('--seeds', type=int, nargs='*', default=None,
+                     help='Seeds to use. Default: [0, 1, 2].')
+    sel.add_argument('--epochs', type=int, default=None, metavar='N',
+                     help='Training epochs per condition. Default: 50.')
+    sel.add_argument('--run-id', type=str, default='', metavar='ID',
+                     help='Label appended to the results filename.')
+
+    probes = parser.add_argument_group('probes and analysis')
+    probes.add_argument('--probe-epochs', type=int, nargs='*', default=[],
                         metavar='E',
-                        help='Epochs at which to run the frozen spatial probe.')
-    parser.add_argument('--seq-phase-snapshots', action='store_true', default=False,
-                        help='G_seq: Grassmannian snapshot after each curriculum phase.')
-    parser.add_argument('--seq-epochs-per-phase', type=int, default=None, metavar='N',
-                        help='G_seq: epochs per curriculum phase.')
+                        help='Epochs at which to run the frozen spatial probe '
+                             '(pairwise tasks only). E.g. --probe-epochs 50 100 150 200.')
+    probes.add_argument('--seq-phase-snapshots', action='store_true', default=False,
+                        help='G_seq: take a full Grassmannian snapshot after each '
+                             'curriculum phase. Enables rank-trajectory analysis.')
+    probes.add_argument('--seq-epochs-per-phase', type=int, default=None, metavar='N',
+                        help='G_seq: epochs per curriculum phase. '
+                             'Default: EPOCHS // 5.')
+
+    mixer = parser.add_argument_group('mixer variants (paper ablations)')
+    mixer.add_argument('--reg-perturb-l1', type=float, default=0.1, metavar='W',
+                       help='L1 penalty on mixer A_perturb (UV^T - VU^T). '
+                            'Drives unused perturbation layers to zero, revealing '
+                            'per-task complexity requirements. Default 0.1 matches '
+                            'the paper runs. Pass 0.0 to disable for ablation.')
+    mixer.add_argument('--full-exp-a', action='store_true',
+                       help='Use full exp(A) = exp(A_sym + A_skew) instead of '
+                            'the default skew-only mixer. Adds magnitude scaling '
+                            'alongside rotation.')
+    mixer.add_argument('--full-matrix-exp', action='store_true',
+                       help='Use exact torch.linalg.matrix_exp instead of the '
+                            'Pade [1,1] approximation. ~3-5x slower; only meaningful '
+                            'when combined with --full-exp-a.')
+    mixer.add_argument('--sym-reg', type=float, default=0.0, metavar='W',
+                       help='Weight on ||A_sym||_F^2 penalty. Used in the '
+                            'pade_symreg / matexp_symreg replications.')
+
+    unified = parser.add_argument_group(
+        'unified loss penalties (three-pillar diagnostic framework)'
+    )
+    unified.add_argument('--profile-weight', type=float, default=0.0, metavar='W',
+                         help='[geometric] Weight on L_profile. Penalizes high meaning '
+                              'fraction at early layers (shortcut prevention).')
+    unified.add_argument('--rank-weight', type=float, default=0.0, metavar='W',
+                         help='[geometric] Weight on L_rank. Pushes reservoir effective '
+                              'rank toward --rank-target (rank-collapse prevention).')
+    unified.add_argument('--rank-target', type=float, default=2.0, metavar='R',
+                         help='Target effective rank floor for L_rank. Default: 2.0.')
+    unified.add_argument('--topo-weight', type=float, default=0.0, metavar='W',
+                         help='[topological] Weight on L_topo. Penalizes low-entropy '
+                              'butterfly routing (encourages diverse permutation paths). '
+                              'Never set non-zero in the paper runs; included for the '
+                              'three-pillar framework.')
+    unified.add_argument('--perturb-lr-mult', type=float, default=1.0, metavar='M',
+                         help='LR multiplier for mixer perturbation params (U, V, eps). '
+                              'These sit at a near-zero attractor; a higher multiplier '
+                              'helps escape the basin. Suggested: 5-20 with --rank-weight.')
+    unified.add_argument('--topo-lr-mult', type=float, default=1.0, metavar='M',
+                         help='LR multiplier for butterfly routing params (phi). '
+                              'Paired with --topo-weight.')
+
+    gram = parser.add_argument_group('GramBlock variant (alternative architecture)')
+    gram.add_argument('--gram-blocks', type=int, nargs='+', default=[],
+                      metavar='K',
+                      help='Add Gram-routed block-diagonal conditions. Accepts one or '
+                           'more block counts, e.g. --gram-blocks 3 6. See README note '
+                           'on GramBlock at low state_dim.')
+    gram.add_argument('--gram-delay', type=int, default=0, metavar='N',
+                      help='Epochs before Gram warmup. 0 = warmup before training.')
+
     args = parser.parse_args()
 
     conditions = args.conditions
     seeds = args.seeds
 
     # Apply CLI overrides to training module globals
-    T.REG_PERTURB_L1 = args.reg_perturb_l1
     T.RUN_ID = args.run_id
+    T.REG_PERTURB_L1 = args.reg_perturb_l1
     T.SYM_REG = args.sym_reg
 
     if args.full_exp_a:
@@ -302,15 +334,12 @@ if __name__ == '__main__':
     T.RANK_WEIGHT = args.rank_weight
     T.RANK_TARGET = args.rank_target
     T.TOPO_WEIGHT = args.topo_weight
-
     T.PERTURB_LR_MULT = args.perturb_lr_mult
     T.TOPO_LR_MULT = args.topo_lr_mult
 
     if args.epochs is not None:
         T.EPOCHS = args.epochs
         print(f"Epochs override: {T.EPOCHS}")
-
-    T.LR_SCHEDULE = args.lr_schedule
 
     T.PROBE_EPOCHS = set(args.probe_epochs) if args.probe_epochs else set()
     T.SEQ_PHASE_SNAPSHOTS = args.seq_phase_snapshots
