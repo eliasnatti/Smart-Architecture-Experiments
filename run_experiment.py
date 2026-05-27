@@ -223,7 +223,10 @@ def run_experiment(conditions=None, seeds=None):
             _save_results(all_results, path=results_path)
 
     aggregated = _aggregate_across_seeds(all_results, conditions, seeds)
-    _make_plots(aggregated, save_dir=results_dir,
+    # When --run-id is set, namespace plots as exp7_<run_id>_*.png so smoke
+    # tests and exploratory runs don't overwrite the canonical paper figures.
+    plot_prefix = f'exp7_{rrun_id}_' if rrun_id else 'exp7_'
+    _make_plots(aggregated, save_dir=results_dir, prefix=plot_prefix,
                 all_results=all_results, seeds=seeds)
 
     elapsed = time.time() - t0
