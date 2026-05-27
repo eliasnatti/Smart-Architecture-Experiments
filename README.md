@@ -57,7 +57,7 @@ python plots.py results/exp7_results_20260515_212500.json
 - Rank 4-6: A_cls, F_multi, G_seq (10-class or multi-task diversity)
 - D_spa paradox: higher rank than B_add but lower transfer accuracy (44% vs 70%) -- semantic alignment with the transfer task matters as much as rank
 - G_seq debris field: sequential curriculum fills rank comparably to multi-task, but meaning fractions skew toward the most recently trained task
-- L1 zero-out (--reg-perturb-l1 0.1, paper default): the L1 penalty on A_perturb automatically drives unused perturbation layers to zero. B_add and D_spa learn to zero perturbation at every layer (pure canonical R_base suffices); F_multi zeros layer 4 entirely; C_cmp keeps only layer 2 active. This is the cleanest evidence of automatic primitive selection -- the same architecture with the same capacity discovers minimal geometric complexity per task.
+- L1 zero-out (--reg-perturb-l1 0.1, paper default): the L1 penalty on A_perturb automatically drives unused perturbation layers to zero. B_add and D_spa learn to zero perturbation at every layer (pure canonical R_base suffices). F_multi zeros one intermediate layer (which layer varies by seed -- the seed-invariant finding is that exactly one intermediate layer is redundant, not that any specific layer is). C_cmp concentrates active perturbation in a single layer. This is the cleanest evidence of automatic primitive selection -- the same architecture with the same capacity discovers minimal geometric complexity per task.
 
 ## Architecture (H_rotational)
 
