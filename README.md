@@ -2,7 +2,7 @@
 
 ## Overview
 
-This code accompanies [paper title]. We train a neural backbone on 7 multi-task configurations of MNIST and measure the Grassmannian reservoir rank -- the effective dimensionality of the backbone's output representation -- as an empirical proxy for how many independent task-relevant subspaces the network develops. The main finding is that reservoir rank tracks task geometry: tasks solvable via scalar shortcuts converge to rank-1, spatial tasks reach rank~2, and classification-based tasks fill rank 4-6. Multi-task training fills more geodesic directions than any single task.
+This code accompanies "Empirical Geometry of Multi-Task Learning: L1-Discovered Complexity, Geodesic Transfer, and Flag Manifold Construction via Cumulative Curriculum". We train a neural backbone on 7 multi-task configurations of MNIST and measure the Grassmannian reservoir rank -- the effective dimensionality of the backbone's output representation -- as an empirical proxy for how many independent task-relevant subspaces the network develops. The main finding is that reservoir rank tracks task geometry: tasks solvable via scalar shortcuts converge to rank-1, spatial tasks reach rank~2, and classification-based tasks fill rank 4-6. Multi-task training fills more geodesic directions than any single task.
 
 ## Installation
 
@@ -69,4 +69,4 @@ The backbone uses three primitive types per layer: (1) LearnedButterflyPermutati
 
 ## Citation
 
-[to be filled]
+TBD
