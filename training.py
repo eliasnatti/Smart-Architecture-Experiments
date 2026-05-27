@@ -361,8 +361,10 @@ def run_spatial_probe(model, loaders, task_name, epoch):
     split = int(n * 0.8)
 
     def probe_acc(X, y):
+        # solver='lbfgs' handles multinomial automatically in sklearn>=1.5;
+        # the explicit multi_class='multinomial' arg was removed in sklearn 1.8.
         clf = LogisticRegression(max_iter=1000, C=1.0, random_state=0,
-                                 multi_class='multinomial', solver='lbfgs')
+                                 solver='lbfgs')
         clf.fit(X[:split], y[:split])
         return float(clf.score(X[split:], y[split:]))
 
